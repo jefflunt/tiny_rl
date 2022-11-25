@@ -1,17 +1,25 @@
 require 'time'
 
 module TinyRl
-  # this class offers a rate limiter that accepts method calls to make over a
-  # period of time, and a strategy to handle what happens when you exceed that
-  # limit
+  # this class offers a rate limiter that accepts instances of TinyRl::Jobs to
+  # execute over period of time, and a strategy to handle what happens when you
+  # exceed that limit
   #
   # Usage:
   #    > rl = TinyRl.new(5, TinyRl::MINUTE, :drop)
   #   => <a rate limiter that will drop method calls over a rate of 5 per minute>
-  #    > 10.times{ rl.do(api, :auth, auth_token) }
-  #   => <the first 5 will go through, and the subsequent 5 will be dropped>
+  #    > 10.times{ rl.exec(TinyRl::Job.new(->(base){ base ** 2 }, nil, rand(10)) }
+  #   => <the first 5 jobs that square the random integer will execute, and the subsequent 5 will be dropped without being executed>
+  #
+  # if you use the :error strategy an instance of TinyRl::ExceededRateLimitError
+  # will be raised when you exceed the limit instead of the TinyRl::Job being
+  # silently dropped.
+  #
+  # if you want to be cautious and not try to run a TinyRl::Job that will
+  # error/drop, then you can check TinyRl::Exec#at_capacity? before trying to
+  # run it.
   class Exec
-    STRATEGIES = %i(drop error queue)
+    STRATEGIES = %i(drop error)
 
     SECOND  = 1
     MINUTE  = SECOND * 60
@@ -28,74 +36,57 @@ module TinyRl
     # strategy: what to do when you're over the rate limit
     #   drop: drop the request, never perform the method call
     #   error: raise an exception when rate exceeded
-    #   queue: enqueue the method call to be executed later when there's time
     def initialize(limit, per, strategy)
-      @total_calls = 0
-      @dropped_calls = 0
-      @errored_calls = 0
+      raise TinyRl::InvalidStrategyError.new("Strategy `#{strategy.inspect}' is not one of the allowed strategies") unless STRATEGIES.include?(strategy)
+      @total_jobs = 0
+      @dropped_jobs = 0
+      @errored_jobs = 0
       @limit = limit
       @per = per
       @strategy = strategy
 
-      case @strategy
-      when :queue
-        @queue = Queue.new
-        Thread.new do
-          loop do
-            sleep 1 if 
-          end
-        end
-      end
-      @jobs = []
+      @job_call_times = []
     end
 
-    # this method enqueues a TinyRl::Job to be executed. if the job can be
-    # executed immediately it will skip the queue.
+    # this method attempts to run the specified job if we're not over the rate
+    # limit. if we are over the rate limit then the behavior depends on the
+    # strategy parameter passed into the initializer
     #
     # job: the TinyRl::Job to be executed
-    def <<(job)
-      @total_calls += 1
+    def exec(job)
+      @total_jobs += 1
 
-      # remove calls beyond the @per threshold
-      loop do
-        if @jobs.length > 0 && @jobs.first < (Time.now - @per)
-          @jobs.shift
-        else
-          break
-        end
-      end
+      # remove oldest call, if applicable
+      # you should only ever have to remove one at most, because this method
+      # will only add one at most
+      @job_call_times.shift if @job_call_times.length > 0 && @job_call_times.first < (Time.now - @per)
 
-      if @jobs.length == @limit
+      if at_capacity?
         case @strategy
         when :drop
-          @dropped_calls += 1
+          @dropped_jobs += 1
         when :error
-          @errored_calls += 1
+          @errored_jobs += 1
           raise ExceededRateLimitError.new("Rate limit of #{@limit} per #{@per} sec exceeded")
-        when :queue
-          @queue << [Time.now.to_i, object, method, notify, args]
         end
-
-        @errored_calls
       else
-        @jobs << Time.now
-        notify.notify(object.send(method, args))
+        @job_call_times << Time.now
+        job.exec
       end
     end
 
-    # returns true if the number of calls records is equal to the max limit
-    # configured, false otherwise
-    def at_capaticy?
-      
+    # returns true if the rate limit has currently been reached, false otherwise
+    def at_capacity?
+      @job_call_times.length == @limit
     end
 
+    # for debugging, really
     def to_s
       <<~TO_S
-              usage: #{@cals.length} of #{@rate} per #{@per} sec
-           strategy: #{@strategy}
-        total calls: #{@total_calls}
-         drop calls: #{@strategy == :drop ? @dropped_calls : 'N/A'}
-        error calls: #{@strategy == :error ? @errored_calls : 'N/A'}
+               limit: #{@limit} per #{@per} seconds
+          total_jobs: #{@total_jobs}
+        dropped_jobs: #{@dropped_jobs}
+        errored_jobs: #{@errored_jobs}
       TO_S
     end
   end
