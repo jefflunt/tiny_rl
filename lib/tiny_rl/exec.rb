@@ -53,6 +53,11 @@ module TinyRl
     # strategy parameter passed into the initializer
     #
     # job: the TinyRl::Job to be executed
+    #
+    # for strategy :drop
+    #   returns true if the job was run, false if it was dropped
+    # for strategy :error
+    #   returns true if the job was run, raises an exception otherwise
     def exec(job)
       @total_jobs += 1
 
@@ -69,9 +74,11 @@ module TinyRl
           @errored_jobs += 1
           raise ExceededRateLimitError.new("Rate limit of #{@limit} per #{@per} sec exceeded")
         end
+        false
       else
         @job_call_times << Time.now
         job.exec
+        true
       end
     end
 
