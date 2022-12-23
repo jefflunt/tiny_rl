@@ -6,7 +6,7 @@ module TinyRl
   # exceed that limit
   #
   # Usage:
-  #    > rl = TinyRl.new(5, TinyRl::MINUTE, :drop)
+  #    > rl = TinyRl::Exec.new(5, TinyRl::Exec::MINUTE, :drop)
   #   => <a rate limiter that will drop method calls over a rate of 5 per minute>
   #    > 10.times{ rl.exec(TinyRl::Job.new(->(base){ base ** 2 }, nil, rand(10)) }
   #   => <the first 5 jobs that square the random integer will execute, and the subsequent 5 will be dropped without being executed>
@@ -61,11 +61,6 @@ module TinyRl
     def exec(job)
       @total_jobs += 1
 
-      # remove oldest call, if applicable
-      # you should only ever have to remove one at most, because this method
-      # will only add one at most
-      @job_call_times.shift if @job_call_times.length > 0 && @job_call_times.first < (Time.now - @per)
-
       if at_capacity?
         case @strategy
         when :drop
@@ -84,7 +79,23 @@ module TinyRl
 
     # returns true if the rate limit has currently been reached, false otherwise
     def at_capacity?
+      _clear_old_jobs
       @job_call_times.length == @limit
+    end
+
+    # useful for monitoring by consuming programs, and for issuing warnings when
+    # you're close, but not over, your limit
+    def used_capacity
+      _clear_old_jobs
+      @job_call_times.length
+    end
+
+    # removes old jobs before. used before checking capacity
+    def _clear_old_jobs
+      loop do
+        break if (@job_call_times.length == 0) || (@job_call_times.first >= (Time.now - @per))
+        @job_call_times.shift
+      end
     end
 
     # for debugging, really
