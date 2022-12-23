@@ -32,6 +32,10 @@ class TinyRl
   MONTH   = DAY * 30
   YEAR    = DAY * 365
 
+  attr_reader :limit,
+              :per,
+              :strategy
+
   # rate: number of requests per unit time
   # per: unit of time (one of SECOND, MINUTE, etc.)
   #   you can pass any integer in as the `per' parameter and it will be
