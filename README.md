@@ -1,2 +1,1 @@
-see `lib/exec.rb`
-then see `lib/job.rb`
+see `lib/tiny_rl.rb`
